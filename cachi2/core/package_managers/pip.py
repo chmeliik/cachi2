@@ -58,6 +58,75 @@ PIP_HASHES_DOC = (
 )
 
 
+def resolve_pip(
+    app_path: Path, output_dir: Path, requirement_files=None, build_requirement_files=None
+):
+    """
+    Resolve and fetch pip dependencies for the given pip application.
+
+    :param Path app_path: the full path to the application source code
+    :param Path output_dir: the root output directory for this request
+    :param list requirement_files: a list of str representing paths to the Python requirement files
+        to be used to compile a list of dependencies to be fetched
+    :param list build_requirement_files: a list of str representing paths to the Python build
+        requirement files to be used to compile a list of build dependencies to be fetched
+    :return: a dictionary that has the following keys:
+        ``package`` which is the dict representing the main Package,
+        ``dependencies`` which is a list of dicts representing the package Dependencies
+        ``requirements`` which is a list of str with the absolute paths for the requirement files
+            belonging to the package
+    :rtype: dict
+    :raises PackageRejected | UnsupportedFeature: if the package is not cachito-pip compatible
+    """
+    pkg_name, pkg_version = _get_pip_metadata(app_path)
+
+    # This could be an empty list
+    if requirement_files is None:
+        requirement_files = _default_requirement_file_list(app_path)
+    else:
+        requirement_files = _get_absolute_pkg_file_paths(app_path, requirement_files)
+
+    # This could be an empty list
+    if build_requirement_files is None:
+        build_requirement_files = _default_requirement_file_list(app_path, devel=True)
+    else:
+        build_requirement_files = _get_absolute_pkg_file_paths(app_path, build_requirement_files)
+
+    requires = _download_from_requirement_files(output_dir, requirement_files)
+    buildrequires = _download_from_requirement_files(output_dir, build_requirement_files)
+
+    # Mark all build dependencies as Cachito dev dependencies
+    for dependency in buildrequires:
+        dependency["dev"] = True
+
+    def _version(dep: dict) -> str:
+        if dep["kind"] == "pypi":
+            version = dep["version"]
+        elif dep["kind"] == "vcs":
+            # Version is "git+" followed by the URL used to to fetch from git
+            version = f"git+{dep['url']}@{dep['ref']}"
+        else:
+            # Version is the original URL with #cachito_hash added if it was not present
+            version = dep["url_with_hash"]
+        return version
+
+    dependencies = [
+        {
+            "name": dep["package"],
+            "version": _version(dep),
+            "type": "pip",
+            "dev": dep.get("dev", False),
+        }
+        for dep in (requires + buildrequires)
+    ]
+
+    return {
+        "package": {"name": pkg_name, "version": pkg_version, "type": "pip"},
+        "dependencies": dependencies,
+        "requirements": [*requirement_files, *build_requirement_files],
+    }
+
+
 def _get_pip_metadata(package_dir):
     """
     Attempt to get the name and version of a Pip package.
@@ -1787,75 +1856,6 @@ def _default_requirement_file_list(path, devel=False):
     filename = DEFAULT_BUILD_REQUIREMENTS_FILE if devel else DEFAULT_REQUIREMENTS_FILE
     req = path / filename
     return [str(req)] if req.is_file() else []
-
-
-def resolve_pip(
-    app_path: Path, output_dir: Path, requirement_files=None, build_requirement_files=None
-):
-    """
-    Resolve and fetch pip dependencies for the given pip application.
-
-    :param Path app_path: the full path to the application source code
-    :param Path output_dir: the root output directory for this request
-    :param list requirement_files: a list of str representing paths to the Python requirement files
-        to be used to compile a list of dependencies to be fetched
-    :param list build_requirement_files: a list of str representing paths to the Python build
-        requirement files to be used to compile a list of build dependencies to be fetched
-    :return: a dictionary that has the following keys:
-        ``package`` which is the dict representing the main Package,
-        ``dependencies`` which is a list of dicts representing the package Dependencies
-        ``requirements`` which is a list of str with the absolute paths for the requirement files
-            belonging to the package
-    :rtype: dict
-    :raises PackageRejected | UnsupportedFeature: if the package is not cachito-pip compatible
-    """
-    pkg_name, pkg_version = _get_pip_metadata(app_path)
-
-    # This could be an empty list
-    if requirement_files is None:
-        requirement_files = _default_requirement_file_list(app_path)
-    else:
-        requirement_files = _get_absolute_pkg_file_paths(app_path, requirement_files)
-
-    # This could be an empty list
-    if build_requirement_files is None:
-        build_requirement_files = _default_requirement_file_list(app_path, devel=True)
-    else:
-        build_requirement_files = _get_absolute_pkg_file_paths(app_path, build_requirement_files)
-
-    requires = _download_from_requirement_files(output_dir, requirement_files)
-    buildrequires = _download_from_requirement_files(output_dir, build_requirement_files)
-
-    # Mark all build dependencies as Cachito dev dependencies
-    for dependency in buildrequires:
-        dependency["dev"] = True
-
-    def _version(dep: dict) -> str:
-        if dep["kind"] == "pypi":
-            version = dep["version"]
-        elif dep["kind"] == "vcs":
-            # Version is "git+" followed by the URL used to to fetch from git
-            version = f"git+{dep['url']}@{dep['ref']}"
-        else:
-            # Version is the original URL with #cachito_hash added if it was not present
-            version = dep["url_with_hash"]
-        return version
-
-    dependencies = [
-        {
-            "name": dep["package"],
-            "version": _version(dep),
-            "type": "pip",
-            "dev": dep.get("dev", False),
-        }
-        for dep in (requires + buildrequires)
-    ]
-
-    return {
-        "package": {"name": pkg_name, "version": pkg_version, "type": "pip"},
-        "dependencies": dependencies,
-        "requirements": [*requirement_files, *build_requirement_files],
-    }
 
 
 def _get_absolute_pkg_file_paths(path, relative_paths):
