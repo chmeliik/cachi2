@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 import bs4
+import piprepo.models
 import pkg_resources
 import requests
 from packaging.utils import canonicalize_name, canonicalize_version
@@ -125,6 +126,38 @@ def resolve_pip(
         "dependencies": dependencies,
         "requirements": [*requirement_files, *build_requirement_files],
     }
+
+
+def build_local_index(pip_deps_dir: Path) -> None:
+    """Build a local PEP 503 index at the specified path.
+
+    The index will contain all the packages found directly at this path (not in subdirectories).
+
+    Before building the index, verify that piprepo won't skip any packages due to invalid filenames
+    (this should be extremely rare in practice, would likely indicate a legacy sdist created with
+     an ancient packaging tool).
+
+    :param pip_deps_dir: the directory which contains the packages and in which to create the index
+    """
+    deps_dir = str(pip_deps_dir)
+    log.info("Generating local pip index at %s", deps_dir)
+
+    index = piprepo.models.LocalIndex(source=deps_dir, destination=deps_dir)
+    index.build_source_packages()
+
+    # piprepo skips invalid filenames, verify this didn't happen
+    expected_files = {f.name for f in pip_deps_dir.iterdir() if f.is_file()}
+    actual_files = {f for package_files in index.packages.values() for f in package_files}
+    missing_files = expected_files - actual_files
+
+    if missing_files:
+        raise UnsupportedFeature(
+            "We cannot generate a complete pip index, because the following filenames "
+            f"have an unsupported format: {', '.join(sorted(missing_files))}"
+        )
+
+    index.create_html_indexes(deps_dir)
+
 
 
 def _get_pip_metadata(package_dir):

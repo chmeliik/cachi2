@@ -8,13 +8,14 @@ from unittest import mock
 from urllib.parse import urlparse
 
 import bs4
+import packaging.utils
 import pytest
 import requests
 
 from cachi2.core.checksum import ChecksumInfo
 from cachi2.core.errors import FetchError, PackageRejected, UnexpectedFormat, UnsupportedFeature
 from cachi2.core.package_managers import general, pip
-from tests.common_utils import write_file_tree
+from tests.common_utils import assert_directories_equal, write_file_tree
 
 THIS_MODULE_DIR = Path(__file__).resolve().parent
 GIT_REF = "9a557920b2a6d4110f838506120904a6fda421a2"
@@ -3183,6 +3184,71 @@ def test_resolve_pip(mock_download, mock_metadata, tmp_path, custom_requirements
         "requirements": [str(req_file), str(build_req_file)],
     }
     assert pkg_info == expected
+
+
+def test_build_local_index(tmp_path: Path, data_dir: Path):
+    package_files = [
+        ### normalized (per PEP 625)
+        "attrs-21.2.0.tar.gz",
+        "backoff-1.11.1.tar.gz",
+        "flit_core-3.8.0.tar.gz",
+        "poetry_core-1.4.0.tar.gz",
+        "urllib3-1.26.7.tar.gz",
+        ### non-normalized
+        "Cython-0.29.32.tar.gz",
+        "PyYAML-6.0.tar.gz",
+        "charset-normalizer-2.0.7.tar.gz",
+        "dockerfile-parse-1.2.0.tar.gz",
+        "ruamel.yaml-0.17.17.tar.gz",
+        "ruamel.yaml.clib-0.2.6.tar.gz",
+        "setuptools-51.0.0.zip",
+        ### different versions of the same package
+        "PyNaCl-1.3.0.tar.gz",
+        "pynacl-1.4.0.tar.gz",
+        ### external (should not be included)
+        "github.com/containerbuildsystem/osbs-client/osbs-client-external-gitcommit-d6454a9.tar.gz",
+    ]
+    for filepath in map(Path, package_files):
+        dest = tmp_path / filepath
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.touch()
+
+    pip.build_local_index(tmp_path)
+
+    def read_html(path: Path) -> bs4.BeautifulSoup:
+        return bs4.BeautifulSoup(path.read_text(), features="html.parser")
+
+    def assert_has_link(html: bs4.BeautifulSoup, href: str) -> None:
+        a = html.find("a", attrs={"href": href})
+        assert a is not None, f'<a href="{href}">...</a> not found in:\n{html}'
+
+    root_index = read_html(tmp_path / "simple" / "index.html")
+
+    # sanity check that we have all the packages
+    for sdist_filename in package_files:
+        if "github.com" in sdist_filename:
+            continue
+
+        normalized_name, _ = packaging.utils.parse_sdist_filename(sdist_filename)
+        # check that the package is linked from simple/index.html
+        assert_has_link(root_index, f"{normalized_name}/")
+        # check that the sdist file is linked from simple/{package}/index.html
+        package_index = read_html(tmp_path / "simple" / normalized_name / "index.html")
+        assert_has_link(package_index, f"../../{sdist_filename}")
+
+    # fully compare with expected output
+    assert_directories_equal(data_dir / "pip-local-index" / "simple", tmp_path / "simple")
+
+
+def test_build_local_index_unsupported_filenames(tmp_path: Path):
+    tmp_path.joinpath("invalid-v1.0.0.tar.gz").touch()
+    tmp_path.joinpath("very_invalid1.0.0.tar.gz").touch()
+
+    msg = "invalid-v1.0.0.tar.gz, very_invalid1.0.0.tar.gz"
+    with pytest.raises(UnsupportedFeature, match=msg):
+        pip.build_local_index(tmp_path)
+
+    assert not tmp_path.joinpath("simple").exists()
 
 
 def test_get_absolute_pkg_file_paths(tmp_path):
