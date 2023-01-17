@@ -9,7 +9,7 @@ attrs==23.1.0 \
     --hash=sha256:6279836d581513a26f1bf235f9acd333bc9115683f14f7e8fae46c98fc50e015
     # via
     #   jsonschema
-    #   pytest
+    #   mailbits
 backoff==2.2.1 \
     --hash=sha256:03f829f5bb1923180821643f8753b0502c3b682293992485b0eef2807afa5cba \
     --hash=sha256:63579f9a0628e06278f7e47b7d7d5b6ce20dc65c5e96a6f3ca99a6adca0396e8
@@ -21,7 +21,9 @@ bandit==1.7.5 \
 beautifulsoup4==4.12.2 \
     --hash=sha256:492bbc69dca35d12daac71c4db1bfff0c876c00ef4a2ffacce226d4638eb72da \
     --hash=sha256:bd2520ca0d9d7d12694a53d44ac482d181b4ec1888909b035a3dbf40d0f57d4a
-    # via cachi2 (pyproject.toml)
+    # via
+    #   cachi2 (pyproject.toml)
+    #   pypi-simple
 black==23.3.0 \
     --hash=sha256:064101748afa12ad2291c2b91c960be28b817c0c7eaa35bec09cc63aa56493c5 \
     --hash=sha256:0945e13506be58bf7db93ee5853243eb368ace1c08a24c65ce108986eac65915 \
@@ -234,6 +236,10 @@ jsonschema==4.17.3 \
     --hash=sha256:0f864437ab8b6076ba6707453ef8f98a6a0d512a80e93f8abdb676f737ecb60d \
     --hash=sha256:a870ad254da1a8ca84b6a2905cac29d265f805acc57af304784962a2aa6508f6
     # via cachi2 (pyproject.toml)
+mailbits==0.2.1 \
+    --hash=sha256:04c06b036bba93067d96b08288780ae7002ba604ac7b205bc55dca52474fc3e2 \
+    --hash=sha256:eb53610e01611a95d2ae46559e00d862d907c776e88034dd53020a53baac21d1
+    # via pypi-simple
 markdown-it-py==2.2.0 \
     --hash=sha256:5a35f8d1870171d9acc47b99612dc146129b631baf04970128b568f190d0cc30 \
     --hash=sha256:7c9a5e412688bc771c67432cbfebcdd686c93ce6484913dccf06cb5a0bea35a1
@@ -286,6 +292,7 @@ packaging==23.1 \
     # via
     #   black
     #   cachi2 (pyproject.toml)
+    #   pypi-simple
     #   pytest
 pathspec==0.11.1 \
     --hash=sha256:2798de800fa92780e33acca925945e9a19a133b715067cf165b8866c15a31687 \
@@ -344,7 +351,9 @@ pydantic==1.10.7 \
     --hash=sha256:e79e999e539872e903767c417c897e729e015872040e56b96e67968c3b918b2d \
     --hash=sha256:ecbbc51391248116c0a055899e6c3e7ffbb11fb5e2a4cd6f2d0b93272118a209 \
     --hash=sha256:f4a2b50e2b03d5776e7f21af73e2070e1b5c0d0df255a827e7c632962f8315af
-    # via cachi2 (pyproject.toml)
+    # via
+    #   cachi2 (pyproject.toml)
+    #   pypi-simple
 pydocstyle==6.3.0 \
     --hash=sha256:118762d452a49d6b05e194ef344a55822987a462831ade91ec5c06fd2169d019 \
     --hash=sha256:7ce43f0c0ac87b07494eb9c0b462c0b73e6ff276807f204d6b53edc72b7e44e1
@@ -357,6 +366,10 @@ pygments==2.15.1 \
     --hash=sha256:8ace4d3c1dd481894b2005f560ead0f9f19ee64fe983366be1a21e171d12775c \
     --hash=sha256:db2db3deb4b4179f399a09054b023b6a586b76499d36965813c71aa8ed7b5fd1
     # via rich
+pypi-simple==1.1.0 \
+    --hash=sha256:d393c23b841637e34038723291b4bcfd19e342ef47205e9eaa5fe4642ccd4763 \
+    --hash=sha256:f50bdf61b914ffa48c5cf2c3998552fad1ce285a71ae898f56342b338d4bf771
+    # via cachi2 (pyproject.toml)
 pyrsistent==0.19.3 \
     --hash=sha256:016ad1afadf318eb7911baa24b049909f7f3bb2c5b1ed7b6a8f21db21ea3faa8 \
     --hash=sha256:1a2994773706bbb4995c31a97bc94f1418314923bd1048c6d964837040376440 \
@@ -448,7 +461,9 @@ pyyaml==6.0 \
 requests==2.29.0 \
     --hash=sha256:e8f3c9be120d3333921d213eef078af392fba3933ab7ed2d1cba3b56f2568c3b \
     --hash=sha256:f2e34a75f4749019bb0e3effb66683630e4ffeaf75819fb51bebef1bf5aef059
-    # via cachi2 (pyproject.toml)
+    # via
+    #   cachi2 (pyproject.toml)
+    #   pypi-simple
 rich==13.3.5 \
     --hash=sha256:2d11b9b8dd03868f09b4fffadc84a6a8cda574e40dc90821bd845720ebb8e89c \
     --hash=sha256:69cdf53799e63f38b95b9bf9c875f8c90e78dd62b2f00c13a911c7a3b9fa4704

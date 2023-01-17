@@ -20,6 +20,7 @@ dependencies = [
     "gitpython",
     "packaging",
     "pydantic",
+    "pypi-simple",
     "pyyaml",
     "requests",
     "semver",

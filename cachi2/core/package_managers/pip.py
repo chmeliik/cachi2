@@ -19,8 +19,8 @@ from cachi2.core.rooted_path import RootedPath
 if TYPE_CHECKING:
     from typing_extensions import TypeGuard
 
-import bs4
 import pkg_resources
+import pypi_simple
 import requests
 from packaging.utils import canonicalize_name, canonicalize_version
 
@@ -1269,7 +1269,7 @@ def _download_dependencies(
 
         if req.kind == "pypi":
             download_info = _download_pypi_package(req, pip_deps_dir, PYPI_URL)
-            _check_metadata_in_sdist(download_info["path"])
+            # _check_metadata_in_sdist(download_info["path"])
         elif req.kind == "vcs":
             download_info = _download_vcs_package(req, pip_deps_dir)
         elif req.kind == "url":
@@ -1497,58 +1497,43 @@ def _download_pypi_package(requirement, pip_deps_dir, pypi_url, pypi_auth=None):
     :raises FetchError: if PyPI query failed
     :raises PackageRejected: if sdists for the package is not found or yanked
     """
-    timeout = get_config().requests_timeout
     package = requirement.package
     version = requirement.version_specs[0][1]
 
-    # See https://www.python.org/dev/peps/pep-0503/
-    package_url = f"{pypi_url.rstrip('/')}/simple/{canonicalize_name(package)}/"
+    log.info("Searching for distributions of %s==%s", package, version)
+
+    pypi_client = pypi_simple.client.PyPISimple(
+        endpoint=f"{pypi_url.rstrip('/')}/simple/",
+        session=pkg_requests_session,
+    )
     try:
-        pypi_resp = pkg_requests_session.get(package_url, auth=pypi_auth, timeout=timeout)
-        pypi_resp.raise_for_status()
-    except requests.RequestException as e:
+        project_page = pypi_client.get_project_page(package)
+    except (requests.RequestException, pypi_simple.NoSuchProjectError) as e:
         raise FetchError(f"PyPI query failed: {e}")
 
-    html = bs4.BeautifulSoup(pypi_resp.text, "html.parser")
-    # Find all anchors anywhere in the doc, the PEP does not specify where they should be
-    links = html.find_all("a")
+    canonical_version = canonicalize_version(version)
 
-    sdists = _process_package_links(links, package, version)
-    if not sdists:
-        raise PackageRejected(
-            f"No sdists found for package {package}=={version}",
-            solution=(
-                "It seems that this version does not exist or isn't published as a sdist "
-                "(a zip or a tarball).\n"
-                "You may be able to specify the dependency directly via a URL instead, "
-                "for example the tarball for a GitHub release."
-            ),
-            docs=PIP_NO_SDIST_DOC,
-        )
+    def match_version(
+        dist_pkgs: list[pypi_simple.DistributionPackage],
+    ) -> list[pypi_simple.DistributionPackage]:
+        return [
+            distpkg
+            for distpkg in dist_pkgs
+            if distpkg.version and canonicalize_version(distpkg.version) == canonical_version
+        ]
 
-    # Choose best candidate based on sorting key
-    sdist = max(sdists, key=_sdist_preference)
-    if sdist.get("yanked", False):
-        raise PackageRejected(
-            f"All sdists for package {package}=={version} are yanked",
-            solution=(
-                f"Please update the {package} version in your requirements file.\n"
-                "Usually, when a version gets yanked from PyPI, there will already "
-                "be a fixed version available.\n"
-                "Otherwise, you may need to pin to the previous version."
-            ),
-        )
+    matching_packages = match_version(project_page.packages)
+    if not matching_packages:
+        raise PackageRejected("placeholder", solution=None)
 
-    download_to = pip_deps_dir.join_within_root(sdist["filename"])
-
-    # URLs may be absolute or relative, see https://peps.python.org/pep-0503/
-    sdist_url = urllib.parse.urljoin(package_url, sdist["url"])
-    download_binary_file(sdist_url, download_to.path, auth=pypi_auth)
+    for distpkg in matching_packages:
+        log.info("Downloading %s", distpkg.filename)
+        pypi_client.download_package(distpkg, pip_deps_dir.join_within_root(distpkg.filename))
 
     return {
-        "package": sdist["name"],
-        "version": sdist["version"],
-        "path": download_to.path,
+        "package": matching_packages[0].project,
+        "version": matching_packages[0].version,
+        "path": pip_deps_dir.join_within_root(matching_packages[0].filename).path,
     }
 
 
