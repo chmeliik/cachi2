@@ -29,8 +29,8 @@ dependencies = [
 [project.scripts]
 cachi2 = "cachi2.interface.cli:app"
 
-[tool.setuptools]
-packages = ["cachi2"]
+[tool.setuptools.packages.find]
+include = ["cachi2", "cachi2.*"]
 
 [tool.mypy]
 plugins = ["pydantic.mypy"]
