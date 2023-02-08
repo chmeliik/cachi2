@@ -1,0 +1,2 @@
+- release to PyPI / switch to static versioning / stop using hashes for Cachito's requirements.txt
+- regardless of ^: figure out versioning
