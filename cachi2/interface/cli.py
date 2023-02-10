@@ -85,7 +85,7 @@ def cachi2(  # noqa: D103; docstring becomes part of --help message
     setup_logging(LogLevel.ERROR)
 
     if config_file:
-        config.set_config(config_file)
+        config.set_config_from_file(config_file)
 
 
 # Allow the user to change the log level for a subcommand

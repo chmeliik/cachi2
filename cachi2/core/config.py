@@ -2,10 +2,9 @@ from pathlib import Path
 
 import yaml
 from pydantic import BaseModel
+from cachi2.core.errors import InvalidInput
 
 from cachi2.core.models.input import parse_user_input
-
-config = None
 
 
 class Config(BaseModel, extra="forbid"):
@@ -20,18 +19,27 @@ class Config(BaseModel, extra="forbid"):
     subprocess_timeout: int = 3600
 
 
+_config = Config()
+
+
 def get_config() -> Config:
     """Get the configuration singleton."""
-    global config
-
-    if not config:
-        config = Config()
-
-    return config
+    global _config
+    return _config
 
 
-def set_config(path: Path) -> None:
-    """Set global config variable using input from file."""
-    global config
+def set_config(new_config: Config) -> None:
+    """Set the configuration singleton."""
+    global _config
+    _config = new_config
 
-    config = parse_user_input(Config.parse_obj, yaml.safe_load(path.read_text()))
+
+def set_config_from_file(config_path: Path):
+    """Set the configuration singleton from a YAML file."""
+    try:
+        data = yaml.safe_load(config_path.read_text())
+    except yaml.YAMLError as e:
+        raise InvalidInput(f"config file is not valid YAML: {e}")
+
+    new_config = parse_user_input(Config.parse_obj, data)
+    set_config(new_config)
