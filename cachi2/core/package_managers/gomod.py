@@ -346,10 +346,10 @@ def _resolve_gomod(path: Path, request: Request, git_dir_path=None):
             pkg = {"name": pkg_name, "type": "go-package", "version": module_version}
             packages.append({"pkg": pkg, "pkg_deps": pkg_level_deps})
 
-        _vet_local_deps(module_level_deps)
+        _vet_local_deps(module_level_deps, repo_root=request.source_dir, module_path=path)
         for pkg in packages:
             # Local dependencies are always relative to the main module, even for subpackages
-            _vet_local_deps(pkg["pkg_deps"])
+            _vet_local_deps(pkg["pkg_deps"], repo_root=request.source_dir, module_path=path)
             _set_full_local_dep_relpaths(pkg["pkg_deps"], module_level_deps)
 
         # import time
@@ -728,7 +728,7 @@ def _load_list_deps(list_deps_output: str) -> Dict[str, dict]:
     return package_info
 
 
-def _vet_local_deps(dependencies: List[dict]):
+def _vet_local_deps(dependencies: List[dict], repo_root: Path, module_path: Path):
     """Fail if any local dependency path is absolute or outside repository."""
     for dep in dependencies:
         version = dep["version"]
@@ -736,13 +736,15 @@ def _vet_local_deps(dependencies: List[dict]):
         if not version:
             continue  # go stdlib
 
-        if version.startswith(".") and ".." in Path(version).parts:
-            raise UnsupportedFeature(f"Path to gomod dependency contains '..': {version}.")
+        if version.startswith(".") and not (module_path / version).resolve().is_relative_to(
+            repo_root
+        ):
+            raise PackageRejected(
+                f"Path to gomod dependency leads outside the repository: {version}.", solution=None
+            )
         elif version.startswith("/") or PureWindowsPath(version).root:
             # This will disallow paths starting with '/', '\' or '<drive letter>:\'
-            raise UnsupportedFeature(
-                f"Absolute paths to gomod dependencies are not supported: {version}"
-            )
+            raise PackageRejected(f"Path to gomod dependency is absolute: {version}", solution=None)
 
 
 def _set_full_local_dep_relpaths(pkg_deps: List[dict], main_module_deps: List[dict]):
