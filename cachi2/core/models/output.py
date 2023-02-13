@@ -22,6 +22,7 @@ class GomodDependency(_DependencyBase):
 
     type: Literal["gomod"]
     version: str
+    replaces: Optional["GomodDependency"] = None
 
 
 class GoPackageDependency(_DependencyBase):

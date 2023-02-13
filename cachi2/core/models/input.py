@@ -99,6 +99,13 @@ PackageInput = Annotated[
 ]
 
 
+class DependencyReplacement(pydantic.BaseModel, extra="forbid"):
+    type: PackageManagerType
+    name: str  # the dependency to replace
+    version: str  # the version to replace it with
+    new_name: Optional[str] = None  # replace the name of the dependency as well
+
+
 class Request(pydantic.BaseModel):
     """Holds all data needed for the processing of a single request."""
 
@@ -106,7 +113,7 @@ class Request(pydantic.BaseModel):
     output_dir: Path
     packages: list[PackageInput]
     flags: frozenset[Flag] = frozenset()
-    dep_replacements: tuple[dict, ...] = ()  # TODO: do we want dep replacements at all?
+    dep_replacements: list[DependencyReplacement] = []
 
     @pydantic.validator("source_dir", "output_dir")
     def _resolve_path(cls, path: Path) -> Path:
@@ -150,12 +157,23 @@ class Request(pydantic.BaseModel):
         return self._packages_by_type(GomodPackageInput)
 
     @property
+    def gomod_dep_replacements(self) -> list[DependencyReplacement]:
+        return self._dep_replacements_by_type("gomod")
+
+    @property
     def pip_packages(self) -> list[PipPackageInput]:
         """Get the pip packages specified for this request."""
         return self._packages_by_type(PipPackageInput)
 
     def _packages_by_type(self, pkgtype: type[T]) -> list[T]:
         return [package for package in self.packages if isinstance(package, pkgtype)]
+
+    def _dep_replacements_by_type(self, pkgtype: PackageManagerType) -> list[DependencyReplacement]:
+        return [
+            dep_replacement
+            for dep_replacement in self.dep_replacements
+            if dep_replacement.type == pkgtype
+        ]
 
     # This is kept here temporarily, should be refactored
     go_mod_cache_download_part: ClassVar[Path] = Path("pkg", "mod", "cache", "download")

@@ -73,7 +73,7 @@ def fetch_gomod_source(request: Request) -> RequestOutput:
             docs=GOMOD_INPUT_DOC,
         )
 
-    if len(subpaths) > 1 and request.dep_replacements:
+    if len(subpaths) > 1 and request.gomod_dep_replacements:
         raise UnsupportedFeature(
             "Dependency replacements are only supported for a single go module path.",
             solution="Dependency replacements are deprecated! Please don't use them.",
@@ -182,11 +182,11 @@ def _resolve_gomod(path: Path, request: Request, git_dir_path=None):
         # Collect all the dependency names that are being replaced to later verify if they were
         # all used
         replaced_dep_names = set()
-        for dep_replacement in request.dep_replacements:
-            name = dep_replacement["name"]
+        for dep_replacement in request.gomod_dep_replacements:
+            name = dep_replacement.name
             replaced_dep_names.add(name)
-            new_name = dep_replacement.get("new_name", name)
-            version = dep_replacement["version"]
+            new_name = dep_replacement.new_name or name
+            version = dep_replacement.version
             log.info("Applying the gomod replacement %s => %s@%s", name, new_name, version)
             _run_gomod_cmd(
                 ("go", "mod", "edit", "-replace", f"{name}={new_name}@{version}"),
@@ -202,7 +202,7 @@ def _resolve_gomod(path: Path, request: Request, git_dir_path=None):
         else:
             log.info("Downloading the gomod dependencies")
             _run_download_cmd(("go", "mod", "download"), run_params)
-        if "force-gomod-tidy" in flags or request.dep_replacements:
+        if "force-gomod-tidy" in flags or request.gomod_dep_replacements:
             _run_gomod_cmd(("go", "mod", "tidy"), run_params)
 
         # main module
