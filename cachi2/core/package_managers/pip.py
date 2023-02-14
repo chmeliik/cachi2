@@ -68,6 +68,51 @@ PIP_EXTERNAL_DEPS_DOC = (
 PIP_NO_SDIST_DOC = "https://github.com/containerbuildsystem/cachi2/blob/main/docs/pip.md#dependency-does-not-distribute-sources"
 
 
+class _TmpdirStorage(DependencyStorage[PipDependency]):
+    def __init__(self) -> None:
+        self._topdir = Path(tempfile.gettempdir()) / "cachi2-storage" / "deps" / "pip"
+
+    def _path_in_storage(
+        self, dependency: PipDependency, checksums: list[ChecksumInfo]
+    ) -> Optional[Path]:
+        url = urllib.parse.urlparse(dependency.version)
+        if url.scheme.startswith("git+"):
+            ref = extract_git_info(dependency.version)["ref"]
+            return self._topdir.joinpath(
+                "git",
+                f"{dependency.name}-sha1-{ref}.tar.gz",
+            )
+        elif url.scheme == "https":
+            checksum = checksums[0]
+            file_ext = next(ext for ext in SDIST_FILE_EXTENSIONS if url.path.endswith(ext))
+            return self._topdir.joinpath(
+                "http",
+                f"{dependency.name}-{checksum.algorithm}-{checksum.hexdigest}{file_ext}",
+            )
+        else:
+            return self._topdir / f"{dependency.name}-{dependency.version}.tar.gz"
+
+    def store_dependency(
+        self, dependency: PipDependency, checksums: list[ChecksumInfo], dep_archive: Path
+    ) -> None:
+        if path := self._path_in_storage(dependency, checksums):
+            path.parent.mkdir(exist_ok=True, parents=True)
+            shutil.copy2(dep_archive, path)
+
+    def retrieve_dependency(
+        self,
+        dependency: PipDependency,
+        checksums: list[ChecksumInfo],
+        consume: Callable[[Path], None],
+    ) -> bool:
+        if (path := self._path_in_storage(dependency, checksums)) and path.exists():
+            if checksums:
+                must_match_any_checksum(path, checksums)
+            consume(path)
+            return True
+        return False
+
+
 def fetch_pip_source(
     request: Request,
     permanent_storage: Optional[DependencyStorage[PipDependency]] = None,
@@ -87,7 +132,7 @@ def fetch_pip_source(
         info = _resolve_pip(
             request.source_dir / package.path,
             request.output_dir,
-            permanent_storage or NoStorage(),
+            permanent_storage or _TmpdirStorage(),
             package.requirements_files,
             package.requirements_build_files,
         )
