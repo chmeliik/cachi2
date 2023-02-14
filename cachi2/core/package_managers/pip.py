@@ -5,13 +5,15 @@ import io
 import logging
 import os.path
 import re
+import shutil
 import tarfile
+import tempfile
 import urllib
 import zipfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, Optional, Union
+from typing import IO, Callable, Optional, Union
 
 import bs4
 import pkg_resources
@@ -21,7 +23,14 @@ from packaging.utils import canonicalize_name, canonicalize_version
 from cachi2.core.checksum import ChecksumInfo, must_match_any_checksum
 from cachi2.core.errors import FetchError, PackageRejected, UnexpectedFormat, UnsupportedFeature
 from cachi2.core.models.input import Request
-from cachi2.core.models.output import EnvironmentVariable, Package, ProjectFile, RequestOutput
+from cachi2.core.models.output import (
+    EnvironmentVariable,
+    Package,
+    PipDependency,
+    ProjectFile,
+    RequestOutput,
+)
+from cachi2.core.package_managers.downloader_interface import DependencyStorage, NoStorage
 from cachi2.core.package_managers.general import (
     download_binary_file,
     extract_git_info,
@@ -59,7 +68,10 @@ PIP_EXTERNAL_DEPS_DOC = (
 PIP_NO_SDIST_DOC = "https://github.com/containerbuildsystem/cachi2/blob/main/docs/pip.md#dependency-does-not-distribute-sources"
 
 
-def fetch_pip_source(request: Request) -> RequestOutput:
+def fetch_pip_source(
+    request: Request,
+    permanent_storage: Optional[DependencyStorage[PipDependency]] = None,
+) -> RequestOutput:
     """Resolve and fetch pip dependencies for the given request."""
     packages: list[Package] = []
     project_files: list[ProjectFile] = []
@@ -75,6 +87,7 @@ def fetch_pip_source(request: Request) -> RequestOutput:
         info = _resolve_pip(
             request.source_dir / package.path,
             request.output_dir,
+            permanent_storage or NoStorage(),
             package.requirements_files,
             package.requirements_build_files,
         )
@@ -1263,7 +1276,9 @@ class PipRequirement:
         return hashes, reduced_options
 
 
-def _download_dependencies(output_dir: Path, requirements_file):
+def _download_dependencies(
+    output_dir: Path, requirements_file, permanent_storage: DependencyStorage[PipDependency]
+):
     """
     Download sdists (source distributions) of all dependencies in a requirements.txt file.
 
@@ -1296,7 +1311,22 @@ def _download_dependencies(output_dir: Path, requirements_file):
 
     downloads = []
 
+    def _consume_stored_pip_dep(req: PipRequirement, temp_path: Path) -> None:
+        if req.kind == "pypi":
+            dest = pip_deps_dir / temp_path.name
+        else:
+            dest = pip_deps_dir / _get_external_requirement_filepath(req)
+        shutil.copy2(temp_path, dest)
+
     for req in requirements_file.requirements:
+        pip_dep, checksums = _to_pip_dep(req)
+
+        if permanent_storage.retrieve_dependency(
+            pip_dep, checksums, consume=lambda pth: _consume_stored_pip_dep(req, pth)
+        ):
+            log.info("Retrieved %s from permanent storage", req.download_line)
+            continue
+
         log.info("Downloading %s", req.download_line)
 
         if req.kind == "pypi":
@@ -1320,10 +1350,32 @@ def _download_dependencies(output_dir: Path, requirements_file):
             hashes = req.hashes or [req.qualifiers["cachito_hash"]]
             _verify_hash(download_info["path"], hashes)
 
+        permanent_storage.store_dependency(pip_dep, checksums, download_info["path"])
+
         download_info["kind"] = req.kind
         downloads.append(download_info)
 
     return downloads
+
+
+def _to_pip_dep(requirement: PipRequirement) -> tuple[PipDependency, list[ChecksumInfo]]:
+    assert requirement.package
+    name = canonicalize_name(requirement.package)
+    hashes = [_to_checksum_info(hash_) for hash_ in requirement.hashes]
+
+    if requirement.kind == "pypi":
+        version = canonicalize_version(requirement.version_specs[0][1])
+    elif requirement.kind == "vcs":
+        git_info = extract_git_info(requirement.url)
+        version = f"git+{git_info['url']}@{git_info['ref']}"
+    elif requirement.kind == "url":
+        version = requirement.url
+        if cachito_hash := requirement.qualifiers.get("cachito_hash"):
+            hashes.append(_to_checksum_info(cachito_hash))
+    else:
+        assert False
+
+    return PipDependency(type="pip", name=name, version=version, dev=False), hashes
 
 
 def _process_options(options):
@@ -1744,16 +1796,19 @@ def _verify_hash(download_path: Path, hashes: list[str]) -> None:
     :raise PackageRejected: If computed hash does not match any of the provided hashes
     """
 
-    def to_checksum_info(hash_: str) -> ChecksumInfo:
-        algorithm, _, digest = hash_.partition(":")
-        return ChecksumInfo(algorithm, digest)
-
     log.info(f"Verifying checksum of {download_path.name}")
-    checksums = list(map(to_checksum_info, hashes))
+    checksums = list(map(_to_checksum_info, hashes))
     must_match_any_checksum(download_path, checksums)
 
 
-def _download_from_requirement_files(output_dir: Path, files):
+def _to_checksum_info(hash_: str) -> ChecksumInfo:
+    algorithm, _, digest = hash_.partition(":")
+    return ChecksumInfo(algorithm, digest)
+
+
+def _download_from_requirement_files(
+    output_dir: Path, files, permanent_storage: DependencyStorage[PipDependency]
+):
     """
     Download dependencies listed in the requirement files.
 
@@ -1771,7 +1826,9 @@ def _download_from_requirement_files(output_dir: Path, files):
                 f"The requirements file does not exist: {req_file}",
                 solution="Please check that you have specified correct requirements file paths",
             )
-        requirements.extend(_download_dependencies(output_dir, PipRequirementsFile(req_file)))
+        requirements.extend(
+            _download_dependencies(output_dir, PipRequirementsFile(req_file), permanent_storage)
+        )
     return requirements
 
 
@@ -1790,7 +1847,11 @@ def _default_requirement_file_list(path, devel=False):
 
 
 def _resolve_pip(
-    app_path: Path, output_dir: Path, requirement_files=None, build_requirement_files=None
+    app_path: Path,
+    output_dir: Path,
+    permanent_storage: DependencyStorage[PipDependency],
+    requirement_files=None,
+    build_requirement_files=None,
 ):
     """
     Resolve and fetch pip dependencies for the given pip application.
@@ -1823,8 +1884,10 @@ def _resolve_pip(
     else:
         build_requirement_files = _get_absolute_pkg_file_paths(app_path, build_requirement_files)
 
-    requires = _download_from_requirement_files(output_dir, requirement_files)
-    buildrequires = _download_from_requirement_files(output_dir, build_requirement_files)
+    requires = _download_from_requirement_files(output_dir, requirement_files, permanent_storage)
+    buildrequires = _download_from_requirement_files(
+        output_dir, build_requirement_files, permanent_storage
+    )
 
     # Mark all build dependencies as Cachi2 dev dependencies
     for dependency in buildrequires:
