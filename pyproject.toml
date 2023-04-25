@@ -15,6 +15,7 @@ classifiers = [
 ]
 requires-python = ">=3.9"
 dependencies = [
+    "aiohttp",
     "backoff",
     "beautifulsoup4",
     "gitpython",

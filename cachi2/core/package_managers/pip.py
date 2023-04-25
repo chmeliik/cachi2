@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any, Iterable, Iterator, Optional
 
+from cachi2.core.async_download import async_download_files
 from cachi2.core.rooted_path import RootedPath
 
 if TYPE_CHECKING:
@@ -1229,6 +1230,13 @@ class PipRequirement:
         return hashes, reduced_options
 
 
+@dataclass
+class PackageToDownload:
+    url: str
+    filename: str
+    hashes: dict[str, str]
+
+
 def _download_dependencies(
     output_dir: RootedPath, requirements_file: PipRequirementsFile
 ) -> list[dict[str, Any]]:
@@ -1262,36 +1270,25 @@ def _download_dependencies(
     pip_deps_dir = output_dir.join_within_root("deps", "pip")
     pip_deps_dir.path.mkdir(parents=True, exist_ok=True)
 
-    downloads = []
+    to_download: list[PackageToDownload] = []
 
     for req in requirements_file.requirements:
-        log.info("Downloading %s", req.download_line)
+        # log.debug("Processing %s", req.download_line)
 
         if req.kind == "pypi":
-            download_info = _download_pypi_package(req, pip_deps_dir, PYPI_URL)
+            to_download.extend(_download_pypi_package(req, pip_deps_dir, PYPI_URL))
             # _check_metadata_in_sdist(download_info["path"])
         elif req.kind == "vcs":
-            download_info = _download_vcs_package(req, pip_deps_dir)
+            _download_vcs_package(req, pip_deps_dir)
         elif req.kind == "url":
-            download_info = _download_url_package(req, pip_deps_dir, trusted_hosts)
+            _download_url_package(req, pip_deps_dir, trusted_hosts)
         else:
             # Should not happen
             raise RuntimeError(f"Unexpected requirement kind: {req.kind!r}")
 
-        log.info(
-            "Successfully downloaded %s to %s",
-            req.download_line,
-            download_info["path"].relative_to(output_dir),
-        )
-
-        if require_hashes or req.kind == "url":
-            hashes = req.hashes or [req.qualifiers["cachito_hash"]]
-            _verify_hash(download_info["path"], hashes)
-
-        download_info["kind"] = req.kind
-        downloads.append(download_info)
-
-    return downloads
+    log.info("Downloading %d distributions", len(to_download))
+    async_download_files((p.url, pip_deps_dir.join_within_root(p.filename)) for p in to_download)
+    return []
 
 
 def _process_options(options):
@@ -1476,7 +1473,9 @@ def _validate_provided_hashes(requirements, require_hashes):
                 raise PackageRejected(msg, solution=None)
 
 
-def _download_pypi_package(requirement, pip_deps_dir, pypi_url, pypi_auth=None):
+def _download_pypi_package(
+    requirement, pip_deps_dir, pypi_url, pypi_auth=None
+) -> list[PackageToDownload]:
     """
     Download the sdist (source distribution) of a PyPI package.
 
@@ -1499,8 +1498,6 @@ def _download_pypi_package(requirement, pip_deps_dir, pypi_url, pypi_auth=None):
     """
     package = requirement.package
     version = requirement.version_specs[0][1]
-
-    log.info("Searching for distributions of %s==%s", package, version)
 
     pypi_client = pypi_simple.client.PyPISimple(
         endpoint=f"{pypi_url.rstrip('/')}/simple/",
@@ -1526,15 +1523,9 @@ def _download_pypi_package(requirement, pip_deps_dir, pypi_url, pypi_auth=None):
     if not matching_packages:
         raise PackageRejected("placeholder", solution=None)
 
-    for distpkg in matching_packages:
-        log.info("Downloading %s", distpkg.filename)
-        pypi_client.download_package(distpkg, pip_deps_dir.join_within_root(distpkg.filename))
+    log.info("Found %d distributions for %s==%s", len(matching_packages), package, version)
 
-    return {
-        "package": matching_packages[0].project,
-        "version": matching_packages[0].version,
-        "path": pip_deps_dir.join_within_root(matching_packages[0].filename).path,
-    }
+    return [PackageToDownload(p.url, p.filename, p.digests) for p in matching_packages]
 
 
 def _process_package_links(links, name, version):
@@ -1624,6 +1615,7 @@ def _download_vcs_package(requirement, pip_deps_dir):
     download_to = pip_deps_dir.join_within_root(_get_external_requirement_filepath(requirement))
     download_to.path.parent.mkdir(exist_ok=True, parents=True)
 
+    log.debug("cloning %s", download_to.path.name)
     clone_as_tarball(git_info["url"], git_info["ref"], to_path=download_to.path)
 
     return {
@@ -1657,6 +1649,7 @@ def _download_url_package(requirement, pip_deps_dir, trusted_hosts):
     else:
         insecure = False
 
+    log.debug("downloading %s", download_to.path.name)
     download_binary_file(requirement.url, download_to.path, insecure=insecure)
 
     if "cachito_hash" in requirement.qualifiers:
