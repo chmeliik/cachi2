@@ -85,6 +85,7 @@ def fetch_pip_source(request: Request) -> RequestOutput:
             request.output_dir,
             package.requirements_files,
             package.requirements_build_files,
+            download_wheels=package.allow_binary,
         )
 
         components.append(Component.from_package_dict(info["package"]))
@@ -1238,7 +1239,7 @@ class PackageToDownload:
 
 
 def _download_dependencies(
-    output_dir: RootedPath, requirements_file: PipRequirementsFile
+    output_dir: RootedPath, requirements_file: PipRequirementsFile, download_wheels: bool
 ) -> list[dict[str, Any]]:
     """
     Download sdists (source distributions) of all dependencies in a requirements.txt file.
@@ -1276,7 +1277,9 @@ def _download_dependencies(
         # log.debug("Processing %s", req.download_line)
 
         if req.kind == "pypi":
-            to_download.extend(_download_pypi_package(req, pip_deps_dir, PYPI_URL))
+            to_download.extend(
+                _download_pypi_package(req, pip_deps_dir, PYPI_URL, download_wheels=download_wheels)
+            )
             # _check_metadata_in_sdist(download_info["path"])
         elif req.kind == "vcs":
             _download_vcs_package(req, pip_deps_dir)
@@ -1474,7 +1477,7 @@ def _validate_provided_hashes(requirements, require_hashes):
 
 
 def _download_pypi_package(
-    requirement, pip_deps_dir, pypi_url, pypi_auth=None
+    requirement, pip_deps_dir, pypi_url, pypi_auth=None, download_wheels: bool = False
 ) -> list[PackageToDownload]:
     """
     Download the sdist (source distribution) of a PyPI package.
@@ -1510,16 +1513,20 @@ def _download_pypi_package(
 
     canonical_version = canonicalize_version(version)
 
-    def match_version(
+    def match_pkgs(
         dist_pkgs: list[pypi_simple.DistributionPackage],
     ) -> list[pypi_simple.DistributionPackage]:
         return [
             distpkg
             for distpkg in dist_pkgs
+            if (
+                distpkg.package_type == "sdist"
+                or (distpkg.package_type == "wheel" and download_wheels)
+            )
             if distpkg.version and canonicalize_version(distpkg.version) == canonical_version
         ]
 
-    matching_packages = match_version(project_page.packages)
+    matching_packages = match_pkgs(project_page.packages)
     if not matching_packages:
         raise PackageRejected("placeholder", solution=None)
 
@@ -1701,7 +1708,7 @@ def _verify_hash(download_path: Path, hashes: list[str]) -> None:
 
 
 def _download_from_requirement_files(
-    output_dir: RootedPath, files: list[RootedPath]
+    output_dir: RootedPath, files: list[RootedPath], download_wheels: bool
 ) -> list[dict[str, Any]]:
     """
     Download dependencies listed in the requirement files.
@@ -1719,7 +1726,9 @@ def _download_from_requirement_files(
                 f"The requirements file does not exist: {req_file}",
                 solution="Please check that you have specified correct requirements file paths",
             )
-        requirements.extend(_download_dependencies(output_dir, PipRequirementsFile(req_file)))
+        requirements.extend(
+            _download_dependencies(output_dir, PipRequirementsFile(req_file), download_wheels)
+        )
     return requirements
 
 
@@ -1741,6 +1750,7 @@ def _resolve_pip(
     output_dir: RootedPath,
     requirement_files: Optional[list[Path]] = None,
     build_requirement_files: Optional[list[Path]] = None,
+    download_wheels: bool = False,
 ) -> dict[str, Any]:
     """
     Resolve and fetch pip dependencies for the given pip application.
@@ -1771,8 +1781,10 @@ def _resolve_pip(
     else:
         resolved_build_req_files = [app_path.join_within_root(r) for r in build_requirement_files]
 
-    requires = _download_from_requirement_files(output_dir, resolved_req_files)
-    buildrequires = _download_from_requirement_files(output_dir, resolved_build_req_files)
+    requires = _download_from_requirement_files(output_dir, resolved_req_files, download_wheels)
+    buildrequires = _download_from_requirement_files(
+        output_dir, resolved_build_req_files, download_wheels
+    )
 
     # Mark all build dependencies as Cachi2 dev dependencies
     for dependency in buildrequires:
