@@ -1,0 +1,2 @@
+# incompatible with the rest of the builddeps
+flit_core<3,>=2
