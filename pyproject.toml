@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cachi2"
-dynamic = ["version"]
+version = "0.1.0"
 license = {text = "GPLv3+"}
 classifiers = [
     "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
@@ -55,9 +55,6 @@ cachi2 = "cachi2.interface.cli:app"
 
 [tool.setuptools]
 packages = ["cachi2"]
-
-[tool.setuptools_scm]
-version_scheme = "post-release"
 
 [tool.mypy]
 plugins = ["pydantic.mypy"]
